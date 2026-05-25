@@ -5,7 +5,7 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 1.6.1
+ * Version: 1.6.2
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
@@ -773,13 +773,18 @@ add_action( 'wp_abilities_api_init', function () {
 		},
 		'execute_callback' => function ( $input ) {
 			$comment_id = (int) $input['id'];
-			if ( ! get_comment( $comment_id ) ) {
+			$comment    = get_comment( $comment_id );
+			if ( ! $comment ) {
 				return new WP_Error( 'not_found', 'Comment not found.' );
 			}
 
-			$result = wp_set_comment_status( $comment_id, $input['status'] );
-			if ( ! $result ) {
-				return new WP_Error( 'update_failed', 'Failed to update comment status.' );
+			$status_map = [ '1' => 'approve', '0' => 'hold', 'spam' => 'spam', 'trash' => 'trash' ];
+			$current    = $status_map[ $comment->comment_approved ] ?? $comment->comment_approved;
+			if ( $current !== $input['status'] ) {
+				$result = wp_set_comment_status( $comment_id, $input['status'] );
+				if ( ! $result ) {
+					return new WP_Error( 'update_failed', 'Failed to update comment status.' );
+				}
 			}
 
 			return [
