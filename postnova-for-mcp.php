@@ -5,7 +5,7 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 2.0.0
+ * Version: 2.1.0
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
@@ -47,6 +47,10 @@ function postnova_all_abilities_meta() {
 		'blog/delete-category'    => [ 'label' => 'Delete Category',          'description' => 'Permanently delete a category. Posts will be reassigned to the default category.' ],
 		'blog/reply-comment'      => [ 'label' => 'Reply to Comment',         'description' => 'Post a reply to an existing comment as the current user.' ],
 		'blog/delete-post'        => [ 'label' => 'Delete Blog Post',         'description' => 'Move a post to trash (or permanently delete if already trashed).' ],
+		'blog/list-media'         => [ 'label' => 'List Media',               'description' => 'Browse the WordPress Media Library with optional search and type filters.' ],
+		'blog/delete-media'       => [ 'label' => 'Delete Media',             'description' => 'Permanently delete a media attachment from the library.' ],
+		'blog/get-site-info'      => [ 'label' => 'Get Site Info',            'description' => 'Retrieve site name, URL, timezone, language, and WordPress version.' ],
+		'blog/get-stats'          => [ 'label' => 'Get Site Stats',           'description' => 'Get an overview of post, comment, and media counts by status.' ],
 	];
 }
 
@@ -1322,6 +1326,182 @@ add_action( 'wp_abilities_api_init', function () {
 				'content' => wp_strip_all_tags( $comment->comment_content ),
 				'date'    => $comment->comment_date,
 				'status'  => 'approve',
+			];
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// List media library
+	postnova_register_ability( 'blog/list-media', [
+		'label'       => 'List Media',
+		'description' => 'Browse the WordPress Media Library with optional search and type filters.',
+		'category'    => 'content',
+		'input_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'search'      => [ 'type' => 'string', 'description' => 'Search by filename or title (optional)' ],
+				'mime_type'   => [ 'type' => 'string', 'description' => 'Filter by MIME type prefix: image, video, audio, application/pdf (optional)' ],
+				'numberposts' => [ 'type' => 'integer', 'default' => 20, 'minimum' => 1, 'maximum' => 100 ],
+			],
+		],
+		'output_schema' => [
+			'type'  => 'array',
+			'items' => [
+				'type'       => 'object',
+				'properties' => [
+					'id'        => [ 'type' => 'integer' ],
+					'title'     => [ 'type' => 'string' ],
+					'filename'  => [ 'type' => 'string' ],
+					'url'       => [ 'type' => 'string' ],
+					'mime_type' => [ 'type' => 'string' ],
+					'date'      => [ 'type' => 'string' ],
+					'alt_text'  => [ 'type' => 'string' ],
+				],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'upload_files' );
+		},
+		'execute_callback' => function ( $input ) {
+			$args = [
+				'post_type'   => 'attachment',
+				'post_status' => 'inherit',
+				'numberposts' => $input['numberposts'] ?? 20,
+				'orderby'     => 'date',
+				'order'       => 'DESC',
+			];
+			if ( ! empty( $input['search'] ) )    $args['s']              = sanitize_text_field( $input['search'] );
+			if ( ! empty( $input['mime_type'] ) ) $args['post_mime_type'] = sanitize_text_field( $input['mime_type'] );
+
+			$items = get_posts( $args );
+			return array_map( function ( $p ) {
+				return [
+					'id'        => $p->ID,
+					'title'     => $p->post_title,
+					'filename'  => basename( get_attached_file( $p->ID ) ),
+					'url'       => wp_get_attachment_url( $p->ID ),
+					'mime_type' => $p->post_mime_type,
+					'date'      => $p->post_date,
+					'alt_text'  => get_post_meta( $p->ID, '_wp_attachment_image_alt', true ),
+				];
+			}, $items );
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// Delete media attachment
+	postnova_register_ability( 'blog/delete-media', [
+		'label'       => 'Delete Media',
+		'description' => 'Permanently delete a media attachment from the library.',
+		'category'    => 'content',
+		'input_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'id' => [ 'type' => 'integer', 'description' => 'Attachment ID to delete' ],
+			],
+			'required' => [ 'id' ],
+		],
+		'output_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'success' => [ 'type' => 'boolean' ],
+				'message' => [ 'type' => 'string' ],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'delete_posts' );
+		},
+		'execute_callback' => function ( $input ) {
+			$id   = (int) $input['id'];
+			$post = get_post( $id );
+			if ( ! $post || $post->post_type !== 'attachment' ) {
+				return new WP_Error( 'not_found', 'Media attachment not found.' );
+			}
+			$result = wp_delete_attachment( $id, true );
+			if ( ! $result ) {
+				return new WP_Error( 'delete_failed', 'Failed to delete media attachment.' );
+			}
+			return [ 'success' => true, 'message' => "Attachment ID {$id} permanently deleted." ];
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// Get site info
+	postnova_register_ability( 'blog/get-site-info', [
+		'label'       => 'Get Site Info',
+		'description' => 'Retrieve site name, URL, timezone, language, and WordPress version.',
+		'category'    => 'content',
+		'input_schema' => [ 'type' => 'object', 'properties' => [] ],
+		'output_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'name'        => [ 'type' => 'string' ],
+				'description' => [ 'type' => 'string' ],
+				'url'         => [ 'type' => 'string' ],
+				'admin_email' => [ 'type' => 'string' ],
+				'timezone'    => [ 'type' => 'string' ],
+				'language'    => [ 'type' => 'string' ],
+				'wp_version'  => [ 'type' => 'string' ],
+				'date_format' => [ 'type' => 'string' ],
+				'time_format' => [ 'type' => 'string' ],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'edit_posts' );
+		},
+		'execute_callback' => function ( $input ) {
+			global $wp_version;
+			return [
+				'name'        => get_bloginfo( 'name' ),
+				'description' => get_bloginfo( 'description' ),
+				'url'         => get_site_url(),
+				'admin_email' => get_bloginfo( 'admin_email' ),
+				'timezone'    => wp_timezone_string(),
+				'language'    => get_bloginfo( 'language' ),
+				'wp_version'  => $wp_version,
+				'date_format' => get_option( 'date_format' ),
+				'time_format' => get_option( 'time_format' ),
+			];
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// Get site stats
+	postnova_register_ability( 'blog/get-stats', [
+		'label'       => 'Get Site Stats',
+		'description' => 'Get an overview of post, comment, and media counts by status.',
+		'category'    => 'content',
+		'input_schema' => [ 'type' => 'object', 'properties' => [] ],
+		'output_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'posts'    => [ 'type' => 'object' ],
+				'comments' => [ 'type' => 'object' ],
+				'media'    => [ 'type' => 'integer' ],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'edit_posts' );
+		},
+		'execute_callback' => function ( $input ) {
+			$post_counts    = wp_count_posts();
+			$comment_counts = wp_count_comments();
+			$media_count    = wp_count_posts( 'attachment' );
+			return [
+				'posts' => [
+					'published' => (int) $post_counts->publish,
+					'draft'     => (int) $post_counts->draft,
+					'scheduled' => (int) $post_counts->future,
+					'pending'   => (int) $post_counts->pending,
+					'trash'     => (int) $post_counts->trash,
+				],
+				'comments' => [
+					'approved' => (int) $comment_counts->approved,
+					'pending'  => (int) $comment_counts->moderated,
+					'spam'     => (int) $comment_counts->spam,
+					'total'    => (int) $comment_counts->total_comments,
+				],
+				'media' => (int) $media_count->inherit,
 			];
 		},
 		'meta' => [ 'mcp' => [ 'public' => true ] ],

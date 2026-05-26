@@ -3,7 +3,7 @@ Contributors: afatyo
 Tags: mcp, claude, ai, blog, automation
 Requires at least: 6.8
 Tested up to: 7.0
-Stable tag: 2.0.0
+Stable tag: 2.1.0
 Requires PHP: 7.4
 License: MIT
 License URI: https://opensource.org/licenses/MIT
@@ -24,6 +24,13 @@ Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the 
 4. Configure your MCP client to connect to your WordPress REST API endpoint.
 
 == Changelog ==
+
+= 2.1.0 =
+* New: blog/list-media — browse Media Library with optional search and MIME type filter.
+* New: blog/delete-media — permanently delete a media attachment by ID.
+* New: blog/get-site-info — retrieve site name, URL, timezone, language, and WP version.
+* New: blog/get-stats — get post/comment/media counts broken down by status.
+* Settings page now shows all 24 abilities.
 
 = 2.0.0 =
 * New: Admin settings page (Postnova menu) to enable/disable individual abilities.
