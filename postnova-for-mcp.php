@@ -21,7 +21,7 @@ function postnova_is_enabled( $slug ) {
 
 function postnova_register_ability( $slug, $args ) {
 	if ( postnova_is_enabled( $slug ) ) {
-		postnova_register_ability($slug, $args );
+		wp_register_ability( $slug, $args );
 	}
 }
 
@@ -53,21 +53,59 @@ function postnova_all_abilities_meta() {
 function postnova_render_settings_page() {
 	if ( ! current_user_can( 'manage_options' ) ) return;
 
-	$disabled  = get_option( 'postnova_disabled_abilities', [] );
-	$abilities = postnova_all_abilities_meta();
+	$disabled       = get_option( 'postnova_disabled_abilities', [] );
+	$abilities      = postnova_all_abilities_meta();
+	$enabled_count  = count( $abilities ) - count( $disabled );
 	?>
-	<div class="wrap">
-		<h1>Postnova Settings</h1>
+	<style>
+		.postnova-wrap { max-width: 900px; }
+		.postnova-header { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+		.postnova-header img { width:36px; height:36px; border-radius:6px; }
+		.postnova-stats { display:flex; gap:12px; margin-bottom:20px; }
+		.postnova-stat { background:#fff; border:1px solid #dcdcde; border-radius:6px; padding:12px 20px; text-align:center; min-width:100px; }
+		.postnova-stat strong { display:block; font-size:24px; color:#1d2327; line-height:1.2; }
+		.postnova-stat span { font-size:12px; color:#646970; }
+		.postnova-table { border-radius:6px; overflow:hidden; }
+		.postnova-table th { background:#f0f0f1; font-weight:600; }
+		.postnova-slug { font-family:monospace; font-size:12px; color:#2271b1; background:#f0f6fc; padding:2px 6px; border-radius:3px; }
+		.postnova-label { font-size:12px; color:#646970; margin-top:3px; }
+		.postnova-toggle { position:relative; display:inline-block; width:40px; height:22px; }
+		.postnova-toggle input { opacity:0; width:0; height:0; }
+		.postnova-slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccd0d4; border-radius:22px; transition:.2s; }
+		.postnova-slider:before { position:absolute; content:""; height:16px; width:16px; left:3px; bottom:3px; background:#fff; border-radius:50%; transition:.2s; }
+		.postnova-toggle input:checked + .postnova-slider { background:#2271b1; }
+		.postnova-toggle input:checked + .postnova-slider:before { transform:translateX(18px); }
+		.postnova-toggle input:focus + .postnova-slider { box-shadow:0 0 0 2px #72aee6; }
+		tr.postnova-disabled td { opacity:.5; }
+	</style>
+	<div class="wrap postnova-wrap">
+		<div class="postnova-header">
+			<h1 style="margin:0">Postnova Settings</h1>
+		</div>
 		<?php if ( isset( $_GET['saved'] ) ) : ?>
-			<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>
+			<div class="notice notice-success is-dismissible"><p><strong>Settings saved.</strong></p></div>
 		<?php endif; ?>
+		<div class="postnova-stats">
+			<div class="postnova-stat">
+				<strong><?php echo count( $abilities ); ?></strong>
+				<span>Total Abilities</span>
+			</div>
+			<div class="postnova-stat">
+				<strong style="color:#00a32a"><?php echo $enabled_count; ?></strong>
+				<span>Enabled</span>
+			</div>
+			<div class="postnova-stat">
+				<strong style="color:<?php echo count( $disabled ) > 0 ? '#d63638' : '#646970'; ?>"><?php echo count( $disabled ); ?></strong>
+				<span>Disabled</span>
+			</div>
+		</div>
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 			<input type="hidden" name="action" value="postnova_save_settings">
 			<?php wp_nonce_field( 'postnova_save_settings' ); ?>
-			<table class="wp-list-table widefat fixed striped" style="margin-top:16px">
+			<table class="wp-list-table widefat fixed postnova-table">
 				<thead>
 					<tr>
-						<th style="width:32%">Ability</th>
+						<th style="width:35%">Ability</th>
 						<th>Description</th>
 						<th style="width:80px;text-align:center">Enabled</th>
 					</tr>
@@ -77,25 +115,32 @@ function postnova_render_settings_page() {
 						$is_enabled = ! in_array( $slug, $disabled, true );
 						$field_id   = 'ability_' . esc_attr( str_replace( '/', '_', $slug ) );
 					?>
-					<tr>
+					<tr class="<?php echo $is_enabled ? '' : 'postnova-disabled'; ?>">
 						<td>
-							<code><?php echo esc_html( $slug ); ?></code><br>
-							<small><?php echo esc_html( $meta['label'] ); ?></small>
+							<span class="postnova-slug"><?php echo esc_html( $slug ); ?></span>
+							<div class="postnova-label"><?php echo esc_html( $meta['label'] ); ?></div>
 						</td>
 						<td><?php echo esc_html( $meta['description'] ); ?></td>
 						<td style="text-align:center">
-							<label class="screen-reader-text" for="<?php echo $field_id; ?>"><?php echo esc_html( $meta['label'] ); ?></label>
-							<input type="checkbox"
-								id="<?php echo $field_id; ?>"
-								name="abilities[]"
-								value="<?php echo esc_attr( $slug ); ?>"
-								<?php checked( $is_enabled ); ?>>
+							<label class="postnova-toggle" title="<?php echo esc_attr( $meta['label'] ); ?>">
+								<input type="checkbox"
+									id="<?php echo $field_id; ?>"
+									name="abilities[]"
+									value="<?php echo esc_attr( $slug ); ?>"
+									<?php checked( $is_enabled ); ?>
+									onchange="this.closest('tr').classList.toggle('postnova-disabled',!this.checked)">
+								<span class="postnova-slider"></span>
+							</label>
 						</td>
 					</tr>
 					<?php endforeach; ?>
 				</tbody>
 			</table>
-			<?php submit_button( 'Save Settings' ); ?>
+			<p style="margin-top:16px">
+				<?php submit_button( 'Save Settings', 'primary', 'submit', false ); ?>
+				<button type="button" class="button" onclick="document.querySelectorAll('.postnova-toggle input').forEach(c=>c.checked=true);document.querySelectorAll('tr').forEach(r=>r.classList.remove('postnova-disabled'))">Enable All</button>
+				<button type="button" class="button" onclick="document.querySelectorAll('.postnova-toggle input').forEach(c=>c.checked=false);document.querySelectorAll('tbody tr').forEach(r=>r.classList.add('postnova-disabled'))" style="margin-left:4px">Disable All</button>
+			</p>
 		</form>
 	</div>
 	<?php
