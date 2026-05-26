@@ -3,7 +3,7 @@ Contributors: afatyo
 Tags: mcp, claude, ai, blog, automation
 Requires at least: 6.8
 Tested up to: 7.0
-Stable tag: 1.6.2
+Stable tag: 2.0.0
 Requires PHP: 7.4
 License: MIT
 License URI: https://opensource.org/licenses/MIT
@@ -24,6 +24,11 @@ Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the 
 4. Configure your MCP client to connect to your WordPress REST API endpoint.
 
 == Changelog ==
+
+= 2.0.0 =
+* New: Admin settings page (Postnova menu) to enable/disable individual abilities.
+* New: Disabled abilities are not registered to MCP at all, as if they don't exist.
+* New: Settings stored globally in wp_options under postnova_disabled_abilities.
 
 = 1.6.2 =
 * Fix: update-comment no longer errors when status is already the same.

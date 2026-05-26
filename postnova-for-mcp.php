@@ -5,11 +5,129 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 1.6.2
+ * Version: 2.0.0
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
  */
+
+function postnova_is_enabled( $slug ) {
+	static $disabled;
+	if ( $disabled === null ) {
+		$disabled = get_option( 'postnova_disabled_abilities', [] );
+	}
+	return ! in_array( $slug, $disabled, true );
+}
+
+function postnova_register_ability( $slug, $args ) {
+	if ( postnova_is_enabled( $slug ) ) {
+		postnova_register_ability($slug, $args );
+	}
+}
+
+function postnova_all_abilities_meta() {
+	return [
+		'blog/create-post'        => [ 'label' => 'Create Blog Post',        'description' => 'Create a new WordPress blog post.' ],
+		'blog/update-post'        => [ 'label' => 'Update Blog Post',         'description' => 'Update title, content, status, excerpt, tags, or categories of an existing post.' ],
+		'blog/list-posts'         => [ 'label' => 'List Blog Posts',          'description' => 'Retrieve a list of blog posts with optional filters.' ],
+		'blog/get-post'           => [ 'label' => 'Get Blog Post',            'description' => 'Retrieve full content and metadata of a single post by ID.' ],
+		'blog/list-tags'          => [ 'label' => 'List Tags',                'description' => 'Retrieve all post tags with their IDs, names, slugs, and post counts.' ],
+		'blog/list-categories'    => [ 'label' => 'List Categories',          'description' => 'Retrieve all post categories with their IDs, names, slugs, and post counts.' ],
+		'blog/schedule-post'      => [ 'label' => 'Schedule Post',            'description' => 'Schedule a post to be published automatically at a future date and time.' ],
+		'blog/create-tag'         => [ 'label' => 'Create Tag',               'description' => 'Create a new post tag.' ],
+		'blog/duplicate-post'     => [ 'label' => 'Duplicate Post',           'description' => 'Duplicate an existing post as a new draft, preserving content, tags, and categories.' ],
+		'blog/list-comments'      => [ 'label' => 'List Comments',            'description' => 'Retrieve comments, optionally filtered by post or status.' ],
+		'blog/create-category'    => [ 'label' => 'Create Category',          'description' => 'Create a new post category.' ],
+		'blog/update-comment'     => [ 'label' => 'Update Comment Status',    'description' => 'Approve, hold, spam, or trash a comment.' ],
+		'blog/upload-media'       => [ 'label' => 'Upload Media',             'description' => 'Upload a media file to the WordPress Media Library by fetching it from a public URL.' ],
+		'blog/set-featured-image' => [ 'label' => 'Set Featured Image',       'description' => 'Set the featured image of a post using a media attachment ID.' ],
+		'blog/update-tag'         => [ 'label' => 'Update Tag',               'description' => 'Edit the name, slug, or description of an existing tag.' ],
+		'blog/update-category'    => [ 'label' => 'Update Category',          'description' => 'Edit the name, slug, description, or parent of an existing category.' ],
+		'blog/delete-tag'         => [ 'label' => 'Delete Tag',               'description' => 'Permanently delete a tag. Posts using this tag will have it removed.' ],
+		'blog/delete-category'    => [ 'label' => 'Delete Category',          'description' => 'Permanently delete a category. Posts will be reassigned to the default category.' ],
+		'blog/reply-comment'      => [ 'label' => 'Reply to Comment',         'description' => 'Post a reply to an existing comment as the current user.' ],
+		'blog/delete-post'        => [ 'label' => 'Delete Blog Post',         'description' => 'Move a post to trash (or permanently delete if already trashed).' ],
+	];
+}
+
+function postnova_render_settings_page() {
+	if ( ! current_user_can( 'manage_options' ) ) return;
+
+	$disabled  = get_option( 'postnova_disabled_abilities', [] );
+	$abilities = postnova_all_abilities_meta();
+	?>
+	<div class="wrap">
+		<h1>Postnova Settings</h1>
+		<?php if ( isset( $_GET['saved'] ) ) : ?>
+			<div class="notice notice-success is-dismissible"><p>Settings saved.</p></div>
+		<?php endif; ?>
+		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+			<input type="hidden" name="action" value="postnova_save_settings">
+			<?php wp_nonce_field( 'postnova_save_settings' ); ?>
+			<table class="wp-list-table widefat fixed striped" style="margin-top:16px">
+				<thead>
+					<tr>
+						<th style="width:32%">Ability</th>
+						<th>Description</th>
+						<th style="width:80px;text-align:center">Enabled</th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $abilities as $slug => $meta ) :
+						$is_enabled = ! in_array( $slug, $disabled, true );
+						$field_id   = 'ability_' . esc_attr( str_replace( '/', '_', $slug ) );
+					?>
+					<tr>
+						<td>
+							<code><?php echo esc_html( $slug ); ?></code><br>
+							<small><?php echo esc_html( $meta['label'] ); ?></small>
+						</td>
+						<td><?php echo esc_html( $meta['description'] ); ?></td>
+						<td style="text-align:center">
+							<label class="screen-reader-text" for="<?php echo $field_id; ?>"><?php echo esc_html( $meta['label'] ); ?></label>
+							<input type="checkbox"
+								id="<?php echo $field_id; ?>"
+								name="abilities[]"
+								value="<?php echo esc_attr( $slug ); ?>"
+								<?php checked( $is_enabled ); ?>>
+						</td>
+					</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
+			<?php submit_button( 'Save Settings' ); ?>
+		</form>
+	</div>
+	<?php
+}
+
+add_action( 'admin_menu', function () {
+	add_menu_page(
+		'Postnova Settings',
+		'Postnova',
+		'manage_options',
+		'postnova-settings',
+		'postnova_render_settings_page',
+		'dashicons-rest-api',
+		80
+	);
+} );
+
+add_action( 'admin_post_postnova_save_settings', function () {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( 'Unauthorized' );
+	}
+	check_admin_referer( 'postnova_save_settings' );
+
+	$all_slugs = array_keys( postnova_all_abilities_meta() );
+	$enabled   = isset( $_POST['abilities'] ) ? array_map( 'sanitize_text_field', (array) $_POST['abilities'] ) : [];
+	$disabled  = array_values( array_diff( $all_slugs, $enabled ) );
+
+	update_option( 'postnova_disabled_abilities', $disabled );
+
+	wp_redirect( admin_url( 'admin.php?page=postnova-settings&saved=1' ) );
+	exit;
+} );
 
 add_action( 'wp_abilities_api_categories_init', function () {
 	wp_register_ability_category( 'content', [
@@ -21,7 +139,7 @@ add_action( 'wp_abilities_api_categories_init', function () {
 add_action( 'wp_abilities_api_init', function () {
 
 	// Create post
-	wp_register_ability( 'blog/create-post', [
+	postnova_register_ability('blog/create-post', [
 		'label'       => 'Create Blog Post',
 		'description' => 'Create a new WordPress blog post.',
 		'category'    => 'content',
@@ -103,7 +221,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Update post
-	wp_register_ability( 'blog/update-post', [
+	postnova_register_ability('blog/update-post', [
 		'label'       => 'Update Blog Post',
 		'description' => 'Update title, content, status, excerpt, tags, or categories of an existing post.',
 		'category'    => 'content',
@@ -218,7 +336,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// List posts
-	wp_register_ability( 'blog/list-posts', [
+	postnova_register_ability('blog/list-posts', [
 		'label'       => 'List Blog Posts',
 		'description' => 'Retrieve a list of blog posts with optional filters.',
 		'category'    => 'content',
@@ -275,7 +393,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Get single post with full content
-	wp_register_ability( 'blog/get-post', [
+	postnova_register_ability('blog/get-post', [
 		'label'       => 'Get Blog Post',
 		'description' => 'Retrieve full content and metadata of a single post by ID.',
 		'category'    => 'content',
@@ -332,7 +450,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// List tags
-	wp_register_ability( 'blog/list-tags', [
+	postnova_register_ability('blog/list-tags', [
 		'label'       => 'List Tags',
 		'description' => 'Retrieve all post tags with their IDs, names, slugs, and post counts.',
 		'category'    => 'content',
@@ -386,7 +504,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// List categories
-	wp_register_ability( 'blog/list-categories', [
+	postnova_register_ability('blog/list-categories', [
 		'label'       => 'List Categories',
 		'description' => 'Retrieve all post categories with their IDs, names, slugs, and post counts.',
 		'category'    => 'content',
@@ -442,7 +560,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Schedule post
-	wp_register_ability( 'blog/schedule-post', [
+	postnova_register_ability('blog/schedule-post', [
 		'label'       => 'Schedule Post',
 		'description' => 'Schedule a post to be published automatically at a future date and time.',
 		'category'    => 'content',
@@ -508,7 +626,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Create tag
-	wp_register_ability( 'blog/create-tag', [
+	postnova_register_ability('blog/create-tag', [
 		'label'       => 'Create Tag',
 		'description' => 'Create a new post tag.',
 		'category'    => 'content',
@@ -560,7 +678,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Duplicate post
-	wp_register_ability( 'blog/duplicate-post', [
+	postnova_register_ability('blog/duplicate-post', [
 		'label'       => 'Duplicate Post',
 		'description' => 'Duplicate an existing post as a new draft, preserving content, tags, and categories.',
 		'category'    => 'content',
@@ -624,7 +742,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// List comments
-	wp_register_ability( 'blog/list-comments', [
+	postnova_register_ability('blog/list-comments', [
 		'label'       => 'List Comments',
 		'description' => 'Retrieve comments, optionally filtered by post or status.',
 		'category'    => 'content',
@@ -688,7 +806,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Create category
-	wp_register_ability( 'blog/create-category', [
+	postnova_register_ability('blog/create-category', [
 		'label'       => 'Create Category',
 		'description' => 'Create a new post category.',
 		'category'    => 'content',
@@ -744,7 +862,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Update comment status
-	wp_register_ability( 'blog/update-comment', [
+	postnova_register_ability('blog/update-comment', [
 		'label'       => 'Update Comment Status',
 		'description' => 'Approve, hold, spam, or trash a comment.',
 		'category'    => 'content',
@@ -797,7 +915,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Upload media from URL
-	wp_register_ability( 'blog/upload-media', [
+	postnova_register_ability('blog/upload-media', [
 		'label'       => 'Upload Media',
 		'description' => 'Upload a media file to the WordPress Media Library by fetching it from a public URL.',
 		'category'    => 'content',
@@ -857,7 +975,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Set featured image
-	wp_register_ability( 'blog/set-featured-image', [
+	postnova_register_ability('blog/set-featured-image', [
 		'label'       => 'Set Featured Image',
 		'description' => 'Set the featured image of a post using a media attachment ID.',
 		'category'    => 'content',
@@ -906,7 +1024,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Update tag
-	wp_register_ability( 'blog/update-tag', [
+	postnova_register_ability('blog/update-tag', [
 		'label'       => 'Update Tag',
 		'description' => 'Edit the name, slug, or description of an existing tag.',
 		'category'    => 'content',
@@ -960,7 +1078,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Update category
-	wp_register_ability( 'blog/update-category', [
+	postnova_register_ability('blog/update-category', [
 		'label'       => 'Update Category',
 		'description' => 'Edit the name, slug, description, or parent of an existing category.',
 		'category'    => 'content',
@@ -1018,7 +1136,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Delete tag
-	wp_register_ability( 'blog/delete-tag', [
+	postnova_register_ability('blog/delete-tag', [
 		'label'       => 'Delete Tag',
 		'description' => 'Permanently delete a tag. Posts using this tag will have it removed.',
 		'category'    => 'content',
@@ -1060,7 +1178,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Delete category
-	wp_register_ability( 'blog/delete-category', [
+	postnova_register_ability('blog/delete-category', [
 		'label'       => 'Delete Category',
 		'description' => 'Permanently delete a category. Posts will be reassigned to the default category.',
 		'category'    => 'content',
@@ -1107,7 +1225,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Reply to comment
-	wp_register_ability( 'blog/reply-comment', [
+	postnova_register_ability('blog/reply-comment', [
 		'label'       => 'Reply to Comment',
 		'description' => 'Post a reply to an existing comment as the current user.',
 		'category'    => 'content',
@@ -1165,7 +1283,7 @@ add_action( 'wp_abilities_api_init', function () {
 	] );
 
 	// Delete / trash post
-	wp_register_ability( 'blog/delete-post', [
+	postnova_register_ability('blog/delete-post', [
 		'label'       => 'Delete Blog Post',
 		'description' => 'Move a post to trash (or permanently delete if already trashed).',
 		'category'    => 'content',
