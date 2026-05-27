@@ -5,11 +5,24 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 2.1.0
+ * Version: 2.1.1
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
  */
+
+function postnova_is_safe_url( string $url ): bool {
+	$parsed = wp_parse_url( $url );
+	if ( ! in_array( $parsed['scheme'] ?? '', [ 'http', 'https' ], true ) ) {
+		return false;
+	}
+	$host = $parsed['host'] ?? '';
+	if ( ! $host ) {
+		return false;
+	}
+	$ip = gethostbyname( $host );
+	return filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) !== false;
+}
 
 function postnova_is_enabled( $slug ) {
 	static $disabled;
@@ -329,6 +342,9 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! $post ) {
 				return new WP_Error( 'not_found', 'Post not found.' );
 			}
+			if ( ! current_user_can( 'edit_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
+			}
 
 			$args = [ 'ID' => $post_id ];
 			if ( isset( $input['title'] ) )   $args['post_title']   = sanitize_text_field( $input['title'] );
@@ -476,6 +492,9 @@ add_action( 'wp_abilities_api_init', function () {
 			$post = get_post( (int) $input['id'] );
 			if ( ! $post ) {
 				return new WP_Error( 'not_found', 'Post not found.' );
+			}
+			if ( ! current_user_can( 'edit_post', $post->ID ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to view this post.' );
 			}
 
 			$tag_terms = wp_get_post_tags( $post->ID );
@@ -640,6 +659,9 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! $post ) {
 				return new WP_Error( 'not_found', 'Post not found.' );
 			}
+			if ( ! current_user_can( 'edit_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
+			}
 
 			$date = sanitize_text_field( $input['date'] );
 			if ( ! preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $date ) ) {
@@ -755,6 +777,9 @@ add_action( 'wp_abilities_api_init', function () {
 			$original = get_post( (int) $input['id'] );
 			if ( ! $original ) {
 				return new WP_Error( 'not_found', 'Post not found.' );
+			}
+			if ( ! current_user_can( 'edit_post', $original->ID ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to duplicate this post.' );
 			}
 
 			$new_title = ! empty( $input['title'] )
@@ -996,6 +1021,10 @@ add_action( 'wp_abilities_api_init', function () {
 			require_once ABSPATH . 'wp-admin/includes/image.php';
 			require_once ABSPATH . 'wp-admin/includes/media.php';
 
+			if ( ! postnova_is_safe_url( $input['url'] ) ) {
+				return new WP_Error( 'invalid_url', 'URL not allowed: must be a public HTTP/HTTPS address.' );
+			}
+
 			$post_id       = ! empty( $input['post_id'] ) ? (int) $input['post_id'] : 0;
 			$attachment_id = media_sideload_image( esc_url_raw( $input['url'] ), $post_id, null, 'id' );
 
@@ -1053,6 +1082,9 @@ add_action( 'wp_abilities_api_init', function () {
 
 			if ( ! get_post( $post_id ) ) {
 				return new WP_Error( 'post_not_found', 'Post not found.' );
+			}
+			if ( ! current_user_can( 'edit_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
 			}
 			if ( ! get_post( $attachment_id ) ) {
 				return new WP_Error( 'attachment_not_found', 'Attachment not found.' );
@@ -1531,12 +1563,19 @@ add_action( 'wp_abilities_api_init', function () {
 			return current_user_can( 'delete_posts' );
 		},
 		'execute_callback' => function ( $input ) {
-			$result = wp_delete_post( (int) $input['id'], (bool) ( $input['force'] ?? false ) );
+			$post_id = (int) $input['id'];
+			if ( ! get_post( $post_id ) ) {
+				return [ 'success' => false, 'message' => 'Failed to delete post or post not found.' ];
+			}
+			if ( ! current_user_can( 'delete_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to delete this post.' );
+			}
+			$result = wp_delete_post( $post_id, (bool) ( $input['force'] ?? false ) );
 			if ( ! $result ) {
 				return [ 'success' => false, 'message' => 'Failed to delete post or post not found.' ];
 			}
 			$action = ( $input['force'] ?? false ) ? 'permanently deleted' : 'moved to trash';
-			return [ 'success' => true, 'message' => "Post {$input['id']} {$action}." ];
+			return [ 'success' => true, 'message' => "Post {$post_id} {$action}." ];
 		},
 		'meta' => [ 'mcp' => [ 'public' => true ] ],
 	] );

@@ -3,7 +3,7 @@ Contributors: afatyo
 Tags: mcp, claude, ai, blog, automation
 Requires at least: 6.8
 Tested up to: 7.0
-Stable tag: 2.1.0
+Stable tag: 2.1.1
 Requires PHP: 7.4
 License: MIT
 License URI: https://opensource.org/licenses/MIT
@@ -24,6 +24,10 @@ Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the 
 4. Configure your MCP client to connect to your WordPress REST API endpoint.
 
 == Changelog ==
+
+= 2.1.1 =
+* Security: Fixed SSRF vulnerability in blog/upload-media — URL now validated to block internal/private IP ranges and non-HTTP(S) schemes.
+* Security: Fixed IDOR vulnerability — all post-level operations (update, get, schedule, duplicate, set-featured-image, delete) now enforce object-level capability checks via current_user_can('edit_post', $id).
 
 = 2.1.0 =
 * New: blog/list-media — browse Media Library with optional search and MIME type filter.
