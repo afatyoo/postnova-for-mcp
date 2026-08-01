@@ -73,6 +73,14 @@ After activation, a **Postnova** menu appears in WP Admin sidebar. From there yo
 
 Settings are global and stored in `wp_options`.
 
+## Security Model
+
+- Every ability requires an authenticated WordPress user and an appropriate capability.
+- Post, revision, comment, and attachment mutations use object-level capability checks.
+- Publishing and scheduling require the post type's `publish_posts` capability.
+- Remote media uses WordPress safe URL validation, validates redirects, and is limited to the lower of the site upload limit or 20 MB by default.
+- Activity logs never store post content or raw ability inputs.
+
 ---
 
 ## Claude Code Setup

@@ -5,25 +5,48 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 2.2.0
+ * Version: 2.2.1
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
  */
 
-define( 'POSTNOVA_VERSION', '2.2.0' );
+define( 'POSTNOVA_VERSION', '2.2.1' );
 
 function postnova_is_safe_url( string $url ): bool {
-	$parsed = wp_parse_url( $url );
-	if ( ! in_array( $parsed['scheme'] ?? '', [ 'http', 'https' ], true ) ) {
-		return false;
+	return wp_http_validate_url( $url ) !== false;
+}
+
+function postnova_max_remote_media_bytes() {
+	$wp_limit = wp_max_upload_size();
+	$default  = $wp_limit > 0 ? min( $wp_limit, 20 * MB_IN_BYTES ) : 20 * MB_IN_BYTES;
+	return max( 1, (int) apply_filters( 'postnova_max_remote_media_bytes', $default ) );
+}
+
+function postnova_limit_remote_media_request( $args ) {
+	$args['limit_response_size'] = postnova_max_remote_media_bytes() + 1;
+	return $args;
+}
+
+function postnova_resolve_category_ids( $names ) {
+	$ids = [];
+	foreach ( (array) $names as $name ) {
+		$name = sanitize_text_field( $name );
+		$term = get_term_by( 'name', $name, 'category' );
+		if ( $term ) {
+			$ids[] = (int) $term->term_id;
+			continue;
+		}
+		if ( ! current_user_can( 'manage_categories' ) ) {
+			return new WP_Error( 'forbidden_category_creation', 'You are not allowed to create new categories.' );
+		}
+		$result = wp_insert_term( $name, 'category' );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		$ids[] = (int) $result['term_id'];
 	}
-	$host = $parsed['host'] ?? '';
-	if ( ! $host ) {
-		return false;
-	}
-	$ip = gethostbyname( $host );
-	return filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) !== false;
+	return $ids;
 }
 
 function postnova_is_enabled( $slug ) {
@@ -397,6 +420,14 @@ add_action( 'wp_abilities_api_init', function () {
 			return current_user_can( 'publish_posts' );
 		},
 		'execute_callback' => function ( $input ) {
+			$cat_ids = [];
+			if ( array_key_exists( 'categories', $input ) ) {
+				$cat_ids = postnova_resolve_category_ids( $input['categories'] );
+				if ( is_wp_error( $cat_ids ) ) {
+					return $cat_ids;
+				}
+			}
+
 			$args = [
 				'post_title'   => sanitize_text_field( $input['title'] ),
 				'post_content' => wp_kses_post( $input['content'] ),
@@ -414,15 +445,7 @@ add_action( 'wp_abilities_api_init', function () {
 				wp_set_post_tags( $post_id, $input['tags'], false );
 			}
 
-			if ( ! empty( $input['categories'] ) ) {
-				$cat_ids = array_filter( array_map( function ( $name ) {
-					$cat = get_term_by( 'name', $name, 'category' );
-					if ( ! $cat ) {
-						$result = wp_insert_term( $name, 'category' );
-						return is_wp_error( $result ) ? null : $result['term_id'];
-					}
-					return $cat->term_id;
-				}, $input['categories'] ) );
+			if ( array_key_exists( 'categories', $input ) ) {
 				wp_set_post_categories( $post_id, $cat_ids );
 			}
 
@@ -516,6 +539,13 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! current_user_can( 'edit_post', $post_id ) ) {
 				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
 			}
+			$post_type = get_post_type_object( $post->post_type );
+			if ( isset( $input['status'] ) && $input['status'] === 'publish' && ( ! $post_type || ! current_user_can( $post_type->cap->publish_posts ) ) ) {
+				return new WP_Error( 'forbidden_publish', 'You are not allowed to publish this post.' );
+			}
+			if ( isset( $input['status'] ) && $input['status'] === 'trash' && ! current_user_can( 'delete_post', $post_id ) ) {
+				return new WP_Error( 'forbidden_delete', 'You are not allowed to move this post to trash.' );
+			}
 
 			$current_tags = wp_get_post_tags( $post_id, [ 'fields' => 'names' ] );
 			$current_cats = wp_get_post_categories( $post_id, [ 'fields' => 'names' ] );
@@ -570,6 +600,14 @@ add_action( 'wp_abilities_api_init', function () {
 				];
 			}
 
+			$resolved_category_ids = null;
+			if ( array_key_exists( 'categories', $input ) ) {
+				$resolved_category_ids = postnova_resolve_category_ids( $input['categories'] );
+				if ( is_wp_error( $resolved_category_ids ) ) {
+					return $resolved_category_ids;
+				}
+			}
+
 			$args = [ 'ID' => $post_id ];
 			if ( isset( $input['title'] ) )   $args['post_title']   = sanitize_text_field( $input['title'] );
 			if ( isset( $input['content'] ) ) $args['post_content'] = wp_kses_post( $input['content'] );
@@ -590,15 +628,7 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( array_key_exists( 'category_ids', $input ) ) {
 				wp_set_post_categories( $post_id, array_map( 'intval', $input['category_ids'] ) );
 			} elseif ( array_key_exists( 'categories', $input ) ) {
-				$cat_ids = array_filter( array_map( function ( $name ) {
-					$cat = get_term_by( 'name', $name, 'category' );
-					if ( ! $cat ) {
-						$result = wp_insert_term( $name, 'category' );
-						return is_wp_error( $result ) ? null : $result['term_id'];
-					}
-					return $cat->term_id;
-				}, $input['categories'] ) );
-				wp_set_post_categories( $post_id, array_values( $cat_ids ) );
+				wp_set_post_categories( $post_id, $resolved_category_ids );
 			}
 
 			$tag_terms = wp_get_post_tags( $post_id, [ 'fields' => 'names' ] );
@@ -661,7 +691,9 @@ add_action( 'wp_abilities_api_init', function () {
 				$args['s'] = sanitize_text_field( $input['search'] );
 			}
 
-			$posts = get_posts( $args );
+			$posts = array_values( array_filter( get_posts( $args ), function ( $post ) {
+				return current_user_can( 'read_post', $post->ID );
+			} ) );
 			return array_map( function ( $p ) {
 				return [
 					'id'        => $p->ID,
@@ -880,6 +912,10 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! current_user_can( 'edit_post', $post_id ) ) {
 				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
 			}
+			$post_type = get_post_type_object( $post->post_type );
+			if ( ! $post_type || ! current_user_can( $post_type->cap->publish_posts ) ) {
+				return new WP_Error( 'forbidden_publish', 'You are not allowed to schedule this post.' );
+			}
 
 			$date = sanitize_text_field( $input['date'] );
 			if ( ! preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $date ) ) {
@@ -1067,7 +1103,7 @@ add_action( 'wp_abilities_api_init', function () {
 			],
 		],
 		'permission_callback' => function () {
-			return current_user_can( 'edit_posts' );
+			return current_user_can( 'moderate_comments' );
 		},
 		'execute_callback' => function ( $input ) {
 			$args = [
@@ -1179,13 +1215,16 @@ add_action( 'wp_abilities_api_init', function () {
 			],
 		],
 		'permission_callback' => function () {
-			return current_user_can( 'edit_posts' );
+			return current_user_can( 'moderate_comments' );
 		},
 		'execute_callback' => function ( $input ) {
 			$comment_id = (int) $input['id'];
 			$comment    = get_comment( $comment_id );
 			if ( ! $comment ) {
 				return new WP_Error( 'not_found', 'Comment not found.' );
+			}
+			if ( ! current_user_can( 'edit_comment', $comment_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to moderate this comment.' );
 			}
 
 			$status_map = [ '1' => 'approve', '0' => 'hold', 'spam' => 'spam', 'trash' => 'trash' ];
@@ -1243,11 +1282,25 @@ add_action( 'wp_abilities_api_init', function () {
 				return new WP_Error( 'invalid_url', 'URL not allowed: must be a public HTTP/HTTPS address.' );
 			}
 
-			$post_id       = ! empty( $input['post_id'] ) ? (int) $input['post_id'] : 0;
-			$attachment_id = media_sideload_image( esc_url_raw( $input['url'] ), $post_id, null, 'id' );
+			$post_id = ! empty( $input['post_id'] ) ? (int) $input['post_id'] : 0;
+			if ( $post_id && ( ! get_post( $post_id ) || ! current_user_can( 'edit_post', $post_id ) ) ) {
+				return new WP_Error( 'forbidden_post', 'You are not allowed to attach media to this post.' );
+			}
+
+			add_filter( 'http_request_args', 'postnova_limit_remote_media_request' );
+			try {
+				$attachment_id = media_sideload_image( esc_url_raw( $input['url'] ), $post_id, null, 'id' );
+			} finally {
+				remove_filter( 'http_request_args', 'postnova_limit_remote_media_request' );
+			}
 
 			if ( is_wp_error( $attachment_id ) ) {
 				return new WP_Error( 'upload_failed', $attachment_id->get_error_message() );
+			}
+			$file = get_attached_file( $attachment_id );
+			if ( $file && file_exists( $file ) && filesize( $file ) > postnova_max_remote_media_bytes() ) {
+				wp_delete_attachment( $attachment_id, true );
+				return new WP_Error( 'file_too_large', 'Remote media exceeds the configured size limit.' );
 			}
 
 			if ( ! empty( $input['title'] ) ) {
@@ -1258,7 +1311,6 @@ add_action( 'wp_abilities_api_init', function () {
 				update_post_meta( $attachment_id, '_wp_attachment_image_alt', sanitize_text_field( $input['alt_text'] ) );
 			}
 
-			$file = get_attached_file( $attachment_id );
 			return [
 				'id'       => $attachment_id,
 				'url'      => wp_get_attachment_url( $attachment_id ),
@@ -1304,8 +1356,12 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! current_user_can( 'edit_post', $post_id ) ) {
 				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
 			}
-			if ( ! get_post( $attachment_id ) ) {
+			$attachment = get_post( $attachment_id );
+			if ( ! $attachment || $attachment->post_type !== 'attachment' || ! wp_attachment_is_image( $attachment_id ) ) {
 				return new WP_Error( 'attachment_not_found', 'Attachment not found.' );
+			}
+			if ( ! current_user_can( 'read_post', $attachment_id ) ) {
+				return new WP_Error( 'forbidden_attachment', 'You are not allowed to use this attachment.' );
 			}
 
 			$result = set_post_thumbnail( $post_id, $attachment_id );
@@ -1546,12 +1602,15 @@ add_action( 'wp_abilities_api_init', function () {
 			],
 		],
 		'permission_callback' => function () {
-			return current_user_can( 'edit_posts' );
+			return current_user_can( 'moderate_comments' );
 		},
 		'execute_callback' => function ( $input ) {
 			$parent = get_comment( (int) $input['comment_id'] );
 			if ( ! $parent ) {
 				return new WP_Error( 'not_found', 'Parent comment not found.' );
+			}
+			if ( ! current_user_can( 'edit_comment', $parent->comment_ID ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to reply to this comment.' );
 			}
 
 			$user    = wp_get_current_user();
@@ -1623,7 +1682,9 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! empty( $input['search'] ) )    $args['s']              = sanitize_text_field( $input['search'] );
 			if ( ! empty( $input['mime_type'] ) ) $args['post_mime_type'] = sanitize_text_field( $input['mime_type'] );
 
-			$items = get_posts( $args );
+			$items = array_values( array_filter( get_posts( $args ), function ( $attachment ) {
+				return current_user_can( 'read_post', $attachment->ID );
+			} ) );
 			return array_map( function ( $p ) {
 				return [
 					'id'        => $p->ID,
@@ -1667,6 +1728,9 @@ add_action( 'wp_abilities_api_init', function () {
 			if ( ! $post || $post->post_type !== 'attachment' ) {
 				return new WP_Error( 'not_found', 'Media attachment not found.' );
 			}
+			if ( ! current_user_can( 'delete_post', $id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to delete this media attachment.' );
+			}
 			$result = wp_delete_attachment( $id, true );
 			if ( ! $result ) {
 				return new WP_Error( 'delete_failed', 'Failed to delete media attachment.' );
@@ -1705,7 +1769,7 @@ add_action( 'wp_abilities_api_init', function () {
 				'name'        => get_bloginfo( 'name' ),
 				'description' => get_bloginfo( 'description' ),
 				'url'         => get_site_url(),
-				'admin_email' => get_bloginfo( 'admin_email' ),
+				'admin_email' => current_user_can( 'manage_options' ) ? get_bloginfo( 'admin_email' ) : '',
 				'timezone'    => wp_timezone_string(),
 				'language'    => get_bloginfo( 'language' ),
 				'wp_version'  => $wp_version,

@@ -20,7 +20,7 @@ Create a new WordPress post.
 
 **Returns:** `id`, `title`, `status`, `permalink`
 
-**Permission:** `publish_posts`
+**Permission:** `publish_posts`, plus `manage_categories` when creating a missing category
 
 ---
 
@@ -42,7 +42,7 @@ Update an existing post, including its taxonomy.
 
 **Returns:** `id`, `title`, `status`, `permalink`, `tags`, `categories`, `dry_run`, `changes`
 
-**Permission:** `edit_posts`
+**Permission:** `edit_posts`, plus `publish_posts` when publishing, `delete_post` when trashing, and `manage_categories` when creating a missing category
 
 ---
 
@@ -55,7 +55,7 @@ Retrieve full content and metadata of a single post by ID.
 
 **Returns:** `id`, `title`, `content`, `excerpt`, `status`, `date`, `permalink`, `tags`, `tag_ids`, `categories`, `category_ids`
 
-**Permission:** `edit_posts`
+**Permission:** `edit_posts` plus object-level `edit_post`
 
 ---
 
@@ -84,7 +84,7 @@ Move a post to trash or permanently delete it.
 
 **Returns:** `success`, `message`
 
-**Permission:** `delete_posts`
+**Permission:** `delete_posts` plus object-level `delete_post`
 
 ---
 
@@ -100,7 +100,7 @@ Schedule a post to publish automatically at a future date and time.
 
 **Notes:** Returns an error if the date is not in the future.
 
-**Permission:** `edit_posts`
+**Permission:** `edit_posts` plus the post type's `publish_posts`
 
 ---
 
@@ -197,7 +197,9 @@ Upload a media file to the WordPress Media Library by fetching it from a public 
 
 **Returns:** `id`, `url`, `filename`, `title`, `alt_text`
 
-**Permission:** `upload_files`
+**Notes:** Remote URLs and redirects are validated by the WordPress safe HTTP API. Downloads are limited to the lower of the site's upload limit or 20 MB by default.
+
+**Permission:** `upload_files`, plus object-level `edit_post` when `post_id` is provided
 
 ---
 
@@ -213,7 +215,7 @@ Set the featured image of a post using a media attachment ID.
 
 **Tip:** Use `blog/upload-media` first to get an `attachment_id`, then pass it here.
 
-**Permission:** `edit_posts`
+**Permission:** `edit_posts` plus object-level `edit_post` and a readable image attachment
 
 ---
 
@@ -228,7 +230,7 @@ Browse the WordPress Media Library.
 
 **Returns:** array of `{ id, title, filename, url, mime_type, date, alt_text }`
 
-**Permission:** `upload_files`
+**Permission:** `upload_files`; results are filtered through object-level `read_post`
 
 ---
 
@@ -241,7 +243,7 @@ Permanently delete a Media Library attachment.
 
 **Returns:** `success`, `message`
 
-**Permission:** `delete_posts`
+**Permission:** `delete_posts` plus object-level `delete_post`
 
 ---
 
@@ -258,7 +260,7 @@ List comments, optionally filtered by post or status.
 
 **Returns:** array of `{ id, post_id, author, email, date, content, status }`
 
-**Permission:** `edit_posts`
+**Permission:** `moderate_comments`
 
 ---
 
@@ -272,7 +274,7 @@ Approve, hold, spam, or trash a comment.
 
 **Returns:** `id`, `status`, `success`
 
-**Permission:** `edit_posts`
+**Permission:** `moderate_comments` plus object-level `edit_comment`
 
 ---
 
@@ -288,7 +290,7 @@ Post a reply to an existing comment as the current logged-in user.
 
 **Notes:** Reply is automatically approved and attributed to the authenticated WordPress user.
 
-**Permission:** `edit_posts`
+**Permission:** `moderate_comments` plus object-level `edit_comment`
 
 ---
 
@@ -403,6 +405,8 @@ Restore a post to a previous revision. WordPress retains the current state as an
 Retrieve site name, description, URL, timezone, language, WordPress version, and date/time formats.
 
 **Returns:** `name`, `description`, `url`, `admin_email`, `timezone`, `language`, `wp_version`, `date_format`, `time_format`
+
+**Privacy:** `admin_email` is empty unless the caller has `manage_options`.
 
 **Permission:** `edit_posts`
 

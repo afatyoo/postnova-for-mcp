@@ -3,7 +3,7 @@ Contributors: afatyo
 Tags: mcp, ai, automation, content management, publishing, wordpress ai, remote publishing, blog, editorial workflow, abilities api
 Requires at least: 6.8
 Tested up to: 7.0
-Stable tag: 2.2.0
+Stable tag: 2.2.1
 Requires PHP: 7.4
 License: MIT
 License URI: https://opensource.org/licenses/MIT
@@ -26,6 +26,15 @@ Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the 
 4. Configure your MCP client to connect to your WordPress REST API endpoint.
 
 == Changelog ==
+
+= 2.2.1 =
+* Security: Enforced publish_posts for publishing and scheduling, and delete_post for trash transitions.
+* Security: Protected comment emails and moderation actions with moderate_comments and object-level edit_comment checks.
+* Security: Fixed attachment IDOR in blog/delete-media and parent-post IDOR in blog/upload-media.
+* Security: Filtered post and media listings through object-level read_post checks.
+* Security: Prevented unauthorized category creation through create-post and update-post.
+* Security: Replaced custom URL checks with WordPress safe URL validation and limited remote media downloads to the configured upload limit or 20 MB.
+* Privacy: Site administrator email is returned only to users with manage_options.
 
 = 2.2.0 =
 * New: blog/list-revisions — list recent revisions for a post.
