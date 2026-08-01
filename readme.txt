@@ -1,18 +1,20 @@
 === Postnova for MCP ===
 Contributors: afatyo
-Tags: mcp, claude, ai, blog, automation
+Tags: mcp, ai, automation, content management, publishing, wordpress ai, remote publishing, blog, editorial workflow, abilities api
 Requires at least: 6.8
 Tested up to: 7.0
-Stable tag: 2.1.1
+Stable tag: 2.2.0
 Requires PHP: 7.4
 License: MIT
 License URI: https://opensource.org/licenses/MIT
 
-Registers blog post abilities for use with the WordPress MCP Adapter. AI agents like Claude can create, edit, schedule, and manage posts directly.
+Registers safe blog publishing abilities for the WordPress MCP Adapter. AI agents can create, preview, revise, restore, schedule, and manage posts directly.
 
 == Description ==
 
-Postnova for MCP registers blog post abilities for use with the WordPress MCP Adapter plugin. AI agents such as Claude can create, edit, schedule, and manage posts directly without needing WP Admin access.
+Postnova for MCP registers 27 blog publishing abilities for use with the WordPress MCP Adapter plugin. AI agents can create, edit, preview, revise, restore, schedule, and manage posts directly without needing WP Admin access.
+
+Postnova includes per-ability controls, object-level permission checks, a content-free activity log, dependency diagnostics, and dry-run previews for safer AI-assisted editing.
 
 Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the Abilities API is built-in. On 6.8, install the Abilities API plugin separately.
 
@@ -24,6 +26,16 @@ Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the 
 4. Configure your MCP client to connect to your WordPress REST API endpoint.
 
 == Changelog ==
+
+= 2.2.0 =
+* New: blog/list-revisions — list recent revisions for a post.
+* New: blog/get-revision — retrieve the content and metadata of a revision.
+* New: blog/restore-revision — safely restore a post to a previous revision.
+* New: dry-run previews for blog/update-post, including field and taxonomy changes.
+* New: activity log for the latest 100 ability executions without storing post content or raw inputs.
+* New: admin diagnostics for the Abilities API, MCP Adapter, and default MCP endpoint.
+* Improved: dependency notices and graceful handling when the Abilities API is unavailable.
+* Improved: empty tag or category arrays can now intentionally clear the assigned taxonomy.
 
 = 2.1.1 =
 * Security: Fixed SSRF vulnerability in blog/upload-media — URL now validated to block internal/private IP ranges and non-HTTP(S) schemes.

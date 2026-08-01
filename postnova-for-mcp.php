@@ -5,11 +5,13 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 2.1.1
+ * Version: 2.2.0
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
  */
+
+define( 'POSTNOVA_VERSION', '2.2.0' );
 
 function postnova_is_safe_url( string $url ): bool {
 	$parsed = wp_parse_url( $url );
@@ -33,9 +35,67 @@ function postnova_is_enabled( $slug ) {
 }
 
 function postnova_register_ability( $slug, $args ) {
-	if ( postnova_is_enabled( $slug ) ) {
-		wp_register_ability( $slug, $args );
+	if ( ! postnova_is_enabled( $slug ) || ! function_exists( 'wp_register_ability' ) ) {
+		return;
 	}
+
+	if ( isset( $args['execute_callback'] ) && is_callable( $args['execute_callback'] ) ) {
+		$callback = $args['execute_callback'];
+		$args['execute_callback'] = function ( $input ) use ( $slug, $callback ) {
+			try {
+				$result = call_user_func( $callback, $input );
+				if ( is_wp_error( $result ) ) {
+					postnova_log_activity( $slug, $input, $result, 'failed' );
+				} else {
+					postnova_log_activity( $slug, $input, $result, 'success' );
+				}
+				return $result;
+			} catch ( Throwable $error ) {
+				postnova_log_activity( $slug, $input, $error->getMessage(), 'failed' );
+				throw $error;
+			}
+		};
+	}
+
+	wp_register_ability( $slug, $args );
+}
+
+/**
+ * Store a compact, content-free audit trail for the latest ability executions.
+ */
+function postnova_log_activity( $slug, $input, $result, $status ) {
+	$object_id = 0;
+	foreach ( [ 'id', 'post_id', 'revision_id', 'attachment_id', 'comment_id', 'term_id' ] as $key ) {
+		if ( is_array( $result ) && ! empty( $result[ $key ] ) ) {
+			$object_id = (int) $result[ $key ];
+			break;
+		}
+		if ( is_array( $input ) && ! empty( $input[ $key ] ) ) {
+			$object_id = (int) $input[ $key ];
+			break;
+		}
+	}
+
+	$message = '';
+	if ( is_wp_error( $result ) ) {
+		$message = $result->get_error_message();
+	} elseif ( $status === 'failed' && is_string( $result ) ) {
+		$message = $result;
+	} elseif ( is_array( $input ) && ! empty( $input['dry_run'] ) ) {
+		$message = 'Dry run; no changes saved.';
+	}
+
+	$activity = get_option( 'postnova_activity_log', [] );
+	array_unshift( $activity, [
+		'time'      => current_time( 'mysql' ),
+		'user_id'   => get_current_user_id(),
+		'ability'   => sanitize_text_field( $slug ),
+		'object_id' => $object_id,
+		'status'    => $status === 'success' ? 'success' : 'failed',
+		'message'   => sanitize_text_field( $message ),
+	] );
+
+	update_option( 'postnova_activity_log', array_slice( $activity, 0, 100 ), false );
 }
 
 function postnova_all_abilities_meta() {
@@ -64,6 +124,9 @@ function postnova_all_abilities_meta() {
 		'blog/delete-media'       => [ 'label' => 'Delete Media',             'description' => 'Permanently delete a media attachment from the library.' ],
 		'blog/get-site-info'      => [ 'label' => 'Get Site Info',            'description' => 'Retrieve site name, URL, timezone, language, and WordPress version.' ],
 		'blog/get-stats'          => [ 'label' => 'Get Site Stats',           'description' => 'Get an overview of post, comment, and media counts by status.' ],
+		'blog/list-revisions'     => [ 'label' => 'List Post Revisions',      'description' => 'List recent revisions for a post.' ],
+		'blog/get-revision'       => [ 'label' => 'Get Post Revision',        'description' => 'Retrieve the content and metadata of a post revision.' ],
+		'blog/restore-revision'   => [ 'label' => 'Restore Post Revision',    'description' => 'Restore a post to a previous revision.' ],
 	];
 }
 
@@ -73,6 +136,10 @@ function postnova_render_settings_page() {
 	$disabled       = get_option( 'postnova_disabled_abilities', [] );
 	$abilities      = postnova_all_abilities_meta();
 	$enabled_count  = count( $abilities ) - count( $disabled );
+	$activity       = get_option( 'postnova_activity_log', [] );
+	$abilities_ok   = function_exists( 'wp_register_ability' );
+	$mcp_ok         = class_exists( '\\WP\\MCP\\Core\\McpAdapter' );
+	$mcp_endpoint   = rest_url( 'mcp/mcp-adapter-default-server' );
 	?>
 	<style>
 		.postnova-wrap { max-width: 900px; }
@@ -84,6 +151,10 @@ function postnova_render_settings_page() {
 		.postnova-stat span { font-size:12px; color:#646970; }
 		.postnova-table { border-radius:6px; overflow:hidden; }
 		.postnova-table th { background:#f0f0f1; font-weight:600; }
+		.postnova-section { margin-top:28px; }
+		.postnova-diagnostics td:first-child { width:220px; font-weight:600; }
+		.postnova-status-ok { color:#00a32a; font-weight:600; }
+		.postnova-status-error { color:#d63638; font-weight:600; }
 		.postnova-slug { font-family:monospace; font-size:12px; color:#2271b1; background:#f0f6fc; padding:2px 6px; border-radius:3px; }
 		.postnova-label { font-size:12px; color:#646970; margin-top:3px; }
 		.postnova-toggle { position:relative; display:inline-block; width:40px; height:22px; }
@@ -159,6 +230,64 @@ function postnova_render_settings_page() {
 				<button type="button" class="button" onclick="document.querySelectorAll('.postnova-toggle input').forEach(c=>c.checked=false);document.querySelectorAll('tbody tr').forEach(r=>r.classList.add('postnova-disabled'))" style="margin-left:4px">Disable All</button>
 			</p>
 		</form>
+
+		<div class="postnova-section">
+			<h2>Diagnostics</h2>
+			<table class="widefat striped postnova-diagnostics">
+				<tbody>
+					<tr>
+						<td>Postnova version</td>
+						<td><?php echo esc_html( POSTNOVA_VERSION ); ?></td>
+					</tr>
+					<tr>
+						<td>Abilities API</td>
+						<td class="<?php echo $abilities_ok ? 'postnova-status-ok' : 'postnova-status-error'; ?>">
+							<?php echo $abilities_ok ? 'Available' : 'Not detected'; ?>
+						</td>
+					</tr>
+					<tr>
+						<td>MCP Adapter</td>
+						<td class="<?php echo $mcp_ok ? 'postnova-status-ok' : 'postnova-status-error'; ?>">
+							<?php echo $mcp_ok ? 'Available' : 'Not detected'; ?>
+						</td>
+					</tr>
+					<tr>
+						<td>Default MCP endpoint</td>
+						<td><code><?php echo esc_html( $mcp_endpoint ); ?></code></td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+
+		<div class="postnova-section">
+			<h2>Recent Activity</h2>
+			<p>Latest ability executions. Post content and raw inputs are never stored.</p>
+			<?php if ( empty( $activity ) ) : ?>
+				<p>No activity recorded yet.</p>
+			<?php else : ?>
+				<table class="widefat striped">
+					<thead><tr><th>Time</th><th>User</th><th>Ability</th><th>Object</th><th>Status</th><th>Message</th></tr></thead>
+					<tbody>
+					<?php foreach ( array_slice( $activity, 0, 20 ) as $event ) : ?>
+						<?php $user = ! empty( $event['user_id'] ) ? get_userdata( (int) $event['user_id'] ) : false; ?>
+						<tr>
+							<td><?php echo esc_html( $event['time'] ?? '' ); ?></td>
+							<td><?php echo esc_html( $user ? $user->user_login : 'Unknown' ); ?></td>
+							<td><code><?php echo esc_html( $event['ability'] ?? '' ); ?></code></td>
+							<td><?php echo ! empty( $event['object_id'] ) ? (int) $event['object_id'] : '&mdash;'; ?></td>
+							<td class="<?php echo ( $event['status'] ?? '' ) === 'success' ? 'postnova-status-ok' : 'postnova-status-error'; ?>"><?php echo esc_html( ucfirst( $event['status'] ?? '' ) ); ?></td>
+							<td><?php echo esc_html( $event['message'] ?? '' ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+					</tbody>
+				</table>
+				<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>" style="margin-top:12px">
+					<input type="hidden" name="action" value="postnova_clear_activity">
+					<?php wp_nonce_field( 'postnova_clear_activity' ); ?>
+					<?php submit_button( 'Clear Activity Log', 'secondary', 'submit', false ); ?>
+				</form>
+			<?php endif; ?>
+		</div>
 	</div>
 	<?php
 }
@@ -173,6 +302,28 @@ add_action( 'admin_menu', function () {
 		'dashicons-rest-api',
 		80
 	);
+} );
+
+add_action( 'admin_post_postnova_clear_activity', function () {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		wp_die( 'Unauthorized' );
+	}
+	check_admin_referer( 'postnova_clear_activity' );
+	delete_option( 'postnova_activity_log' );
+	wp_safe_redirect( admin_url( 'admin.php?page=postnova-settings' ) );
+	exit;
+} );
+
+add_action( 'admin_notices', function () {
+	if ( ! current_user_can( 'activate_plugins' ) ) {
+		return;
+	}
+	if ( ! function_exists( 'wp_register_ability' ) ) {
+		echo '<div class="notice notice-error"><p><strong>Postnova for MCP:</strong> The WordPress Abilities API is not available. Use WordPress 6.9+ or install the Abilities API plugin on WordPress 6.8.</p></div>';
+	}
+	if ( ! class_exists( '\\WP\\MCP\\Core\\McpAdapter' ) ) {
+		echo '<div class="notice notice-warning"><p><strong>Postnova for MCP:</strong> MCP Adapter was not detected. Install and activate it to expose Postnova abilities to MCP clients.</p></div>';
+	}
 } );
 
 add_action( 'admin_post_postnova_save_settings', function () {
@@ -192,6 +343,9 @@ add_action( 'admin_post_postnova_save_settings', function () {
 } );
 
 add_action( 'wp_abilities_api_categories_init', function () {
+	if ( ! function_exists( 'wp_register_ability_category' ) ) {
+		return;
+	}
 	wp_register_ability_category( 'content', [
 		'label'       => 'Content',
 		'description' => 'Abilities for managing WordPress content.',
@@ -319,6 +473,11 @@ add_action( 'wp_abilities_api_init', function () {
 					'items' => [ 'type' => 'integer' ],
 					'description' => 'Category IDs to set directly — replaces existing categories (optional)',
 				],
+				'dry_run'      => [
+					'type'        => 'boolean',
+					'default'     => false,
+					'description' => 'Preview changes without saving them',
+				],
 			],
 			'required' => [ 'id' ],
 		],
@@ -331,6 +490,18 @@ add_action( 'wp_abilities_api_init', function () {
 				'permalink'   => [ 'type' => 'string' ],
 				'tags'        => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ],
 				'categories'  => [ 'type' => 'array', 'items' => [ 'type' => 'string' ] ],
+				'dry_run'     => [ 'type' => 'boolean' ],
+				'changes'     => [
+					'type'  => 'array',
+					'items' => [
+						'type'       => 'object',
+						'properties' => [
+							'field'    => [ 'type' => 'string' ],
+							'current'  => [ 'type' => 'string' ],
+							'proposed' => [ 'type' => 'string' ],
+						],
+					],
+				],
 			],
 		],
 		'permission_callback' => function () {
@@ -346,6 +517,59 @@ add_action( 'wp_abilities_api_init', function () {
 				return new WP_Error( 'forbidden', 'You are not allowed to edit this post.' );
 			}
 
+			$current_tags = wp_get_post_tags( $post_id, [ 'fields' => 'names' ] );
+			$current_cats = wp_get_post_categories( $post_id, [ 'fields' => 'names' ] );
+			$current_tags = is_array( $current_tags ) ? $current_tags : [];
+			$current_cats = is_array( $current_cats ) ? $current_cats : [];
+			$changes      = [];
+
+			$preview_fields = [
+				'title'   => [ 'property' => 'post_title', 'sanitize' => 'sanitize_text_field' ],
+				'content' => [ 'property' => 'post_content', 'sanitize' => 'wp_kses_post' ],
+				'status'  => [ 'property' => 'post_status', 'sanitize' => null ],
+				'excerpt' => [ 'property' => 'post_excerpt', 'sanitize' => 'sanitize_text_field' ],
+			];
+			foreach ( $preview_fields as $input_key => $field ) {
+				if ( ! array_key_exists( $input_key, $input ) ) {
+					continue;
+				}
+				$proposed = $field['sanitize'] ? call_user_func( $field['sanitize'], $input[ $input_key ] ) : $input[ $input_key ];
+				$current  = $post->{$field['property']};
+				if ( $current !== $proposed ) {
+					$changes[] = [
+						'field'    => $input_key,
+						'current'  => $input_key === 'content' ? sprintf( '%d characters', strlen( $current ) ) : (string) $current,
+						'proposed' => $input_key === 'content' ? sprintf( '%d characters', strlen( $proposed ) ) : (string) $proposed,
+					];
+				}
+			}
+
+			if ( array_key_exists( 'tag_ids', $input ) ) {
+				$proposed_tags = get_terms( [ 'taxonomy' => 'post_tag', 'include' => array_map( 'intval', $input['tag_ids'] ), 'hide_empty' => false, 'fields' => 'names' ] );
+				$changes[] = [ 'field' => 'tags', 'current' => implode( ', ', $current_tags ), 'proposed' => is_wp_error( $proposed_tags ) ? '' : implode( ', ', $proposed_tags ) ];
+			} elseif ( array_key_exists( 'tags', $input ) ) {
+				$changes[] = [ 'field' => 'tags', 'current' => implode( ', ', $current_tags ), 'proposed' => implode( ', ', array_map( 'sanitize_text_field', $input['tags'] ) ) ];
+			}
+			if ( array_key_exists( 'category_ids', $input ) ) {
+				$proposed_cats = get_terms( [ 'taxonomy' => 'category', 'include' => array_map( 'intval', $input['category_ids'] ), 'hide_empty' => false, 'fields' => 'names' ] );
+				$changes[] = [ 'field' => 'categories', 'current' => implode( ', ', $current_cats ), 'proposed' => is_wp_error( $proposed_cats ) ? '' : implode( ', ', $proposed_cats ) ];
+			} elseif ( array_key_exists( 'categories', $input ) ) {
+				$changes[] = [ 'field' => 'categories', 'current' => implode( ', ', $current_cats ), 'proposed' => implode( ', ', array_map( 'sanitize_text_field', $input['categories'] ) ) ];
+			}
+
+			if ( ! empty( $input['dry_run'] ) ) {
+				return [
+					'id'         => $post_id,
+					'title'      => $post->post_title,
+					'status'     => $post->post_status,
+					'permalink'  => get_permalink( $post_id ),
+					'tags'       => $current_tags,
+					'categories' => $current_cats,
+					'dry_run'    => true,
+					'changes'    => $changes,
+				];
+			}
+
 			$args = [ 'ID' => $post_id ];
 			if ( isset( $input['title'] ) )   $args['post_title']   = sanitize_text_field( $input['title'] );
 			if ( isset( $input['content'] ) ) $args['post_content'] = wp_kses_post( $input['content'] );
@@ -357,18 +581,15 @@ add_action( 'wp_abilities_api_init', function () {
 				return new WP_Error( 'update_failed', $updated->get_error_message() );
 			}
 
-			// Tags by name
-			if ( ! empty( $input['tags'] ) ) {
+			if ( array_key_exists( 'tag_ids', $input ) ) {
+				wp_set_object_terms( $post_id, array_map( 'intval', $input['tag_ids'] ), 'post_tag' );
+			} elseif ( array_key_exists( 'tags', $input ) ) {
 				wp_set_post_tags( $post_id, $input['tags'], false );
 			}
 
-			// Tags by ID
-			if ( ! empty( $input['tag_ids'] ) ) {
-				wp_set_object_terms( $post_id, array_map( 'intval', $input['tag_ids'] ), 'post_tag' );
-			}
-
-			// Categories by name
-			if ( ! empty( $input['categories'] ) ) {
+			if ( array_key_exists( 'category_ids', $input ) ) {
+				wp_set_post_categories( $post_id, array_map( 'intval', $input['category_ids'] ) );
+			} elseif ( array_key_exists( 'categories', $input ) ) {
 				$cat_ids = array_filter( array_map( function ( $name ) {
 					$cat = get_term_by( 'name', $name, 'category' );
 					if ( ! $cat ) {
@@ -378,11 +599,6 @@ add_action( 'wp_abilities_api_init', function () {
 					return $cat->term_id;
 				}, $input['categories'] ) );
 				wp_set_post_categories( $post_id, array_values( $cat_ids ) );
-			}
-
-			// Categories by ID
-			if ( ! empty( $input['category_ids'] ) ) {
-				wp_set_post_categories( $post_id, array_map( 'intval', $input['category_ids'] ) );
 			}
 
 			$tag_terms = wp_get_post_tags( $post_id, [ 'fields' => 'names' ] );
@@ -395,6 +611,8 @@ add_action( 'wp_abilities_api_init', function () {
 				'permalink'  => get_permalink( $post_id ),
 				'tags'       => is_array( $tag_terms ) ? $tag_terms : [],
 				'categories' => is_array( $cat_terms ) ? $cat_terms : [],
+				'dry_run'    => false,
+				'changes'    => $changes,
 			];
 		},
 		'meta' => [ 'mcp' => [ 'public' => true ] ],
@@ -1534,6 +1752,166 @@ add_action( 'wp_abilities_api_init', function () {
 					'total'    => (int) $comment_counts->total_comments,
 				],
 				'media' => (int) $media_count->inherit,
+			];
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// List post revisions
+	postnova_register_ability( 'blog/list-revisions', [
+		'label'       => 'List Post Revisions',
+		'description' => 'List recent revisions for a post without returning the full revision content.',
+		'category'    => 'content',
+		'input_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'post_id' => [ 'type' => 'integer', 'description' => 'Post ID whose revisions should be listed' ],
+				'number'  => [ 'type' => 'integer', 'default' => 10, 'minimum' => 1, 'maximum' => 100 ],
+			],
+			'required' => [ 'post_id' ],
+		],
+		'output_schema' => [
+			'type'  => 'array',
+			'items' => [
+				'type'       => 'object',
+				'properties' => [
+					'id'        => [ 'type' => 'integer' ],
+					'post_id'   => [ 'type' => 'integer' ],
+					'author_id' => [ 'type' => 'integer' ],
+					'author'    => [ 'type' => 'string' ],
+					'date'      => [ 'type' => 'string' ],
+					'title'     => [ 'type' => 'string' ],
+				],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'edit_posts' );
+		},
+		'execute_callback' => function ( $input ) {
+			$post_id = (int) $input['post_id'];
+			$post    = get_post( $post_id );
+			if ( ! $post || $post->post_type === 'revision' ) {
+				return new WP_Error( 'not_found', 'Post not found.' );
+			}
+			if ( ! current_user_can( 'edit_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to view revisions for this post.' );
+			}
+			$number    = max( 1, min( 100, (int) ( $input['number'] ?? 10 ) ) );
+			$revisions = wp_get_post_revisions( $post_id, [ 'numberposts' => $number, 'order' => 'DESC' ] );
+
+			return array_values( array_map( function ( $revision ) use ( $post_id ) {
+				$author = get_userdata( (int) $revision->post_author );
+				return [
+					'id'        => (int) $revision->ID,
+					'post_id'   => $post_id,
+					'author_id' => (int) $revision->post_author,
+					'author'    => $author ? $author->display_name : '',
+					'date'      => get_post_time( 'c', true, $revision ),
+					'title'     => $revision->post_title,
+				];
+			}, $revisions ) );
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// Get a single post revision
+	postnova_register_ability( 'blog/get-revision', [
+		'label'       => 'Get Post Revision',
+		'description' => 'Retrieve the content and metadata of a single post revision.',
+		'category'    => 'content',
+		'input_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'revision_id' => [ 'type' => 'integer', 'description' => 'Revision ID to retrieve' ],
+			],
+			'required' => [ 'revision_id' ],
+		],
+		'output_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'id'        => [ 'type' => 'integer' ],
+				'post_id'   => [ 'type' => 'integer' ],
+				'author_id' => [ 'type' => 'integer' ],
+				'author'    => [ 'type' => 'string' ],
+				'date'      => [ 'type' => 'string' ],
+				'title'     => [ 'type' => 'string' ],
+				'content'   => [ 'type' => 'string' ],
+				'excerpt'   => [ 'type' => 'string' ],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'edit_posts' );
+		},
+		'execute_callback' => function ( $input ) {
+			$revision = wp_get_post_revision( (int) $input['revision_id'] );
+			if ( ! $revision ) {
+				return new WP_Error( 'not_found', 'Revision not found.' );
+			}
+			$post_id = (int) $revision->post_parent;
+			if ( ! current_user_can( 'edit_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to view this revision.' );
+			}
+			$author = get_userdata( (int) $revision->post_author );
+			return [
+				'id'        => (int) $revision->ID,
+				'post_id'   => $post_id,
+				'author_id' => (int) $revision->post_author,
+				'author'    => $author ? $author->display_name : '',
+				'date'      => get_post_time( 'c', true, $revision ),
+				'title'     => $revision->post_title,
+				'content'   => $revision->post_content,
+				'excerpt'   => $revision->post_excerpt,
+			];
+		},
+		'meta' => [ 'mcp' => [ 'public' => true ] ],
+	] );
+
+	// Restore a post revision
+	postnova_register_ability( 'blog/restore-revision', [
+		'label'       => 'Restore Post Revision',
+		'description' => 'Restore a post to a previous revision. WordPress preserves the current state as another revision.',
+		'category'    => 'content',
+		'input_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'revision_id' => [ 'type' => 'integer', 'description' => 'Revision ID to restore' ],
+			],
+			'required' => [ 'revision_id' ],
+		],
+		'output_schema' => [
+			'type'       => 'object',
+			'properties' => [
+				'id'          => [ 'type' => 'integer' ],
+				'revision_id' => [ 'type' => 'integer' ],
+				'title'       => [ 'type' => 'string' ],
+				'status'      => [ 'type' => 'string' ],
+				'permalink'   => [ 'type' => 'string' ],
+			],
+		],
+		'permission_callback' => function () {
+			return current_user_can( 'edit_posts' );
+		},
+		'execute_callback' => function ( $input ) {
+			$revision_id = (int) $input['revision_id'];
+			$revision    = wp_get_post_revision( $revision_id );
+			if ( ! $revision ) {
+				return new WP_Error( 'not_found', 'Revision not found.' );
+			}
+			$post_id = (int) $revision->post_parent;
+			if ( ! current_user_can( 'edit_post', $post_id ) ) {
+				return new WP_Error( 'forbidden', 'You are not allowed to restore this revision.' );
+			}
+			$restored = wp_restore_post_revision( $revision_id );
+			if ( ! $restored || is_wp_error( $restored ) ) {
+				$message = is_wp_error( $restored ) ? $restored->get_error_message() : 'WordPress could not restore the revision.';
+				return new WP_Error( 'restore_failed', $message );
+			}
+			return [
+				'id'          => (int) $restored,
+				'revision_id' => $revision_id,
+				'title'       => get_the_title( $restored ),
+				'status'      => get_post_status( $restored ),
+				'permalink'   => get_permalink( $restored ),
 			];
 		},
 		'meta' => [ 'mcp' => [ 'public' => true ] ],

@@ -1,6 +1,6 @@
 # Ability Reference
 
-Full parameter reference for all 15 abilities in `postnova-for-mcp`.
+Full parameter reference for all 27 abilities in `postnova-for-mcp`.
 
 ---
 
@@ -38,8 +38,9 @@ Update an existing post, including its taxonomy.
 | `tag_ids` | array of integer | | Tag IDs to set directly (replaces existing tags) |
 | `categories` | array of string | | Category names to set (replaces existing categories) |
 | `category_ids` | array of integer | | Category IDs to set directly (replaces existing categories) |
+| `dry_run` | boolean | | Preview the proposed changes without saving (default: `false`) |
 
-**Returns:** `id`, `title`, `status`, `permalink`, `tags`, `categories`
+**Returns:** `id`, `title`, `status`, `permalink`, `tags`, `categories`, `dry_run`, `changes`
 
 **Permission:** `edit_posts`
 
@@ -216,6 +217,34 @@ Set the featured image of a post using a media attachment ID.
 
 ---
 
+### `blog/list-media`
+Browse the WordPress Media Library.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `number` | integer | | Number of attachments (default: 20, max: 100) |
+| `search` | string | | Search media titles |
+| `mime_type` | string | | Filter by MIME type, such as `image` or `image/jpeg` |
+
+**Returns:** array of `{ id, title, filename, url, mime_type, date, alt_text }`
+
+**Permission:** `upload_files`
+
+---
+
+### `blog/delete-media`
+Permanently delete a Media Library attachment.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `id` | integer | ✅ | Attachment ID to delete |
+
+**Returns:** `success`, `message`
+
+**Permission:** `delete_posts`
+
+---
+
 ## Comments
 
 ### `blog/list-comments`
@@ -323,3 +352,65 @@ Permanently delete a category. Posts will be reassigned to the default category.
 **Notes:** Cannot delete the default category.
 
 **Permission:** `manage_categories`
+
+---
+
+## Revisions
+
+### `blog/list-revisions`
+List recent revisions for a post without returning their full content.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `post_id` | integer | ✅ | Post ID whose revisions should be listed |
+| `number` | integer | | Number of revisions (default: 10, max: 100) |
+
+**Returns:** array of `{ id, post_id, author_id, author, date, title }`
+
+**Permission:** `edit_posts` plus object-level `edit_post`
+
+---
+
+### `blog/get-revision`
+Retrieve the full content and metadata of a revision.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `revision_id` | integer | ✅ | Revision ID to retrieve |
+
+**Returns:** `id`, `post_id`, `author_id`, `author`, `date`, `title`, `content`, `excerpt`
+
+**Permission:** `edit_posts` plus object-level `edit_post`
+
+---
+
+### `blog/restore-revision`
+Restore a post to a previous revision. WordPress retains the current state as another revision.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `revision_id` | integer | ✅ | Revision ID to restore |
+
+**Returns:** `id`, `revision_id`, `title`, `status`, `permalink`
+
+**Permission:** `edit_posts` plus object-level `edit_post`
+
+---
+
+## Site
+
+### `blog/get-site-info`
+Retrieve site name, description, URL, timezone, language, WordPress version, and date/time formats.
+
+**Returns:** `name`, `description`, `url`, `admin_email`, `timezone`, `language`, `wp_version`, `date_format`, `time_format`
+
+**Permission:** `edit_posts`
+
+---
+
+### `blog/get-stats`
+Get post, comment, and media counts broken down by status.
+
+**Returns:** `posts`, `comments`, `media`
+
+**Permission:** `edit_posts`

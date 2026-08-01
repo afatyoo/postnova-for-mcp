@@ -3,10 +3,10 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![WordPress](https://img.shields.io/badge/WordPress-6.8%2B-21759b)
 ![PHP](https://img.shields.io/badge/PHP-7.4%2B-777bb3)
-![Abilities](https://img.shields.io/badge/abilities-24-green)
+![Abilities](https://img.shields.io/badge/abilities-27-green)
 [![WordPress Plugin](https://img.shields.io/badge/WordPress.org-postnova--for--mcp-blue?logo=wordpress)](https://wordpress.org/plugins/postnova-for-mcp/)
 
-A WordPress plugin that registers blog post *abilities* for use with the [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter). AI agents like **Claude** can create, edit, schedule, and manage posts directly — no WP Admin needed.
+A WordPress plugin that registers safe blog publishing *abilities* for use with the [WordPress MCP Adapter](https://github.com/WordPress/mcp-adapter). AI agents can create, preview, revise, restore, schedule, and manage posts directly — no WP Admin needed.
 
 ---
 
@@ -64,10 +64,12 @@ Activate at **WP Admin → Plugins**.
 
 After activation, a **Postnova** menu appears in WP Admin sidebar. From there you can:
 
-- See all 24 registered abilities in one table
+- See all 27 registered abilities in one table
 - Toggle individual abilities on or off with a switch
 - Disabled abilities are completely unregistered from MCP — as if they don't exist
 - **Enable All** / **Disable All** buttons for quick bulk actions
+- Check Abilities API and MCP Adapter diagnostics
+- Review the latest ability executions without storing post content or raw inputs
 
 Settings are global and stored in `wp_options`.
 
@@ -105,19 +107,22 @@ Settings are global and stored in `wp_options`.
 
 ---
 
-## Available Abilities (24)
+## Available Abilities (27)
 
 ### Posts
 
 | Ability | Description |
 |---|---|
 | `blog/create-post` | Create a new post with title, content, status, tags, and categories |
-| `blog/update-post` | Update title, content, status, excerpt, tags, and categories of an existing post |
+| `blog/update-post` | Update or dry-run preview title, content, status, excerpt, tags, and categories |
 | `blog/get-post` | Get full content and metadata of a post by ID, including tags and categories |
 | `blog/list-posts` | List posts with optional filters (status, keyword, count) |
 | `blog/delete-post` | Move a post to trash or permanently delete it |
 | `blog/schedule-post` | Schedule a post to publish automatically at a future date and time |
 | `blog/duplicate-post` | Duplicate a post as a new draft, preserving content, tags, and categories |
+| `blog/list-revisions` | List recent revisions for a post |
+| `blog/get-revision` | Retrieve the content and metadata of a revision |
+| `blog/restore-revision` | Restore a post to a previous revision |
 
 ### Tags & Categories
 
