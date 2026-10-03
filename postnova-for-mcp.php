@@ -5,7 +5,7 @@
  * @wordpress-plugin
  * Plugin Name: Postnova for MCP
  * Description: Registers blog post abilities (create, update, list, delete) for the MCP Adapter.
- * Version: 2.2.1
+ * Version: 2.2.2
  * Requires at least: 6.8
  * Requires PHP: 7.4
  * License: MIT
