@@ -3,7 +3,7 @@ Contributors: afatyo
 Tags: mcp, ai, automation, content management, publishing, wordpress ai, remote publishing, blog, editorial workflow, abilities api
 Requires at least: 6.8
 Tested up to: 7.0
-Stable tag: 2.2.1
+Stable tag: 2.2.2
 Requires PHP: 7.4
 License: MIT
 License URI: https://opensource.org/licenses/MIT
@@ -26,6 +26,9 @@ Requires the MCP Adapter plugin (WordPress/mcp-adapter). On WordPress 6.9+, the 
 4. Configure your MCP client to connect to your WordPress REST API endpoint.
 
 == Changelog ==
+
+= 2.2.2 =
+* Compatibility: Normalize the Mcp-Protocol-Version header for MCP routes so clients that omit it or send an older negotiated revision keep working with MCP Adapter 0.7.0+ (which rejects requests whose header does not match the session version). Supported headers are left untouched. The forced version can be changed with the postnova_mcp_forced_protocol_version filter.
 
 = 2.2.1 =
 * Security: Enforced publish_posts for publishing and scheduling, and delete_post for trash transitions.

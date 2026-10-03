@@ -11,7 +11,44 @@
  * License: MIT
  */
 
-define( 'POSTNOVA_VERSION', '2.2.1' );
+define( 'POSTNOVA_VERSION', '2.2.2' );
+
+/**
+ * Compatibility shim: normalize the MCP-Protocol-Version header.
+ *
+ * MCP Adapter 0.7.0+ requires every non-initialize request to carry an
+ * Mcp-Protocol-Version header that matches the version negotiated for the
+ * session (2025-11-25 for clients that propose an older revision). Some MCP
+ * clients omit that header or echo back their own proposed version, which the
+ * strict 0.7.0 handler rejects with "MCP-Protocol-Version must be 2025-11-25
+ * for this session". We normalize the header for MCP routes before the adapter
+ * validates it, so those clients keep working. Headers that already carry a
+ * supported version are left untouched.
+ *
+ * @param mixed            $result  Dispatch result (null to continue).
+ * @param \WP_REST_Server  $server  REST server instance.
+ * @param \WP_REST_Request $request Current request.
+ * @return mixed Unchanged $result.
+ */
+add_filter( 'rest_pre_dispatch', function ( $result, $server, $request ) {
+	if ( ! ( $request instanceof WP_REST_Request ) ) {
+		return $result;
+	}
+
+	if ( strpos( (string) $request->get_route(), '/mcp/' ) !== 0 ) {
+		return $result;
+	}
+
+	$forced    = (string) apply_filters( 'postnova_mcp_forced_protocol_version', '2025-11-25' );
+	$supported = array( '2025-11-25', '2026-07-28' );
+	$current   = (string) $request->get_header( 'Mcp-Protocol-Version' );
+
+	if ( '' === $current || ! in_array( $current, $supported, true ) ) {
+		$request->set_header( 'Mcp-Protocol-Version', $forced );
+	}
+
+	return $result;
+}, 1, 3 );
 
 function postnova_is_safe_url( string $url ): bool {
 	return wp_http_validate_url( $url ) !== false;
